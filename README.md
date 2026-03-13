@@ -8,7 +8,7 @@
 <img width="634" height="1009" alt="image" src="https://github.com/user-attachments/assets/1f0cdfbf-6463-4473-96da-faafa99f11b1" />
 
 
-## 主题设置
+## 主题设置（点击左上角文字打开）
 
 <img width="871" height="1009" alt="image" src="https://github.com/user-attachments/assets/b7d217da-9ee4-4dfe-9ecc-563e834961e6" />
 
