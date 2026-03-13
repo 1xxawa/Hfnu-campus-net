@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>校园网自动登录</title>
+    <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+    <div class="app-container">
+        <div class="card">
+            <div class="card-header" data-tauri-drag-region>
+                <div class="logo-wrapper">
+                    <div class="logo-text" id="themeBtn" title="主题设置">
+                        <h1>校园网登录</h1>
+                        <p class="version" id="appVersion">v1.0.6</p>
+                    </div>
+                </div>
+                <div class="header-buttons">
+                    <button class="announcement-btn" id="announcementBtn" title="公告">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                        </svg>
+                        <span class="announcement-dot" id="announcementDot"></span>
+                    </button>
+                    <button class="close-btn" id="closeBtn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <div class="status-indicator" id="statusIndicator">
+                <div class="status-dot" id="statusDot"></div>
+                <span class="status-label" id="statusLabel">检测中...</span>
+            </div>
+
+            <form id="loginForm" class="form-container">
+                <div class="input-group">
+                    <label class="input-label">学号</label>
+                    <div class="input-wrapper">
+                        <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                            <circle cx="12" cy="7" r="4"/>
+                        </svg>
+                        <input type="text" id="studentId" placeholder="请输入学号" required />
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label class="input-label">密码</label>
+                    <div class="input-wrapper">
+                        <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                        </svg>
+                        <input type="password" id="password" placeholder="请输入密码" required />
+                        <button type="button" class="password-toggle" id="togglePassword">
+                            <svg class="eye-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                <circle cx="12" cy="12" r="3"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label class="input-label">运营商</label>
+                    <div class="select-wrapper">
+                        <select id="operator">
+                            <option value="telecom">电信</option>
+                            <option value="cmcc">移动</option>
+                        </select>
+                        <svg class="select-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                    </div>
+                </div>
+
+                <div class="settings-row">
+                    <div class="setting-item">
+                        <label class="toggle-label">
+                            <input type="checkbox" id="savePassword" checked />
+                            <span class="toggle-switch"></span>
+                            <span class="toggle-text">保存密码</span>
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <label class="toggle-label">
+                            <input type="checkbox" id="autoLogin" checked />
+                            <span class="toggle-switch"></span>
+                            <span class="toggle-text">自动登录</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="settings-row">
+                    <div class="setting-item">
+                        <label class="toggle-label">
+                            <input type="checkbox" id="autoLaunch" />
+                            <span class="toggle-switch"></span>
+                            <span class="toggle-text">开机自启动</span>
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <label class="toggle-label" title="程序启动时不显示窗口，只在后台运行">
+                            <input type="checkbox" id="hideOnStartup" />
+                            <span class="toggle-switch"></span>
+                            <span class="toggle-text">启动时隐藏窗口</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button type="submit" class="btn btn-primary" id="loginBtn">
+                        <span class="btn-content">
+                            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+                                <polyline points="10 17 15 12 10 7"/>
+                                <line x1="15" y1="12" x2="3" y2="12"/>
+                            </svg>
+                            <span class="btn-text">登录</span>
+                        </span>
+                        <span class="btn-loading">
+                            <svg class="spinner" viewBox="0 0 24 24">
+                                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4" stroke-linecap="round"/>
+                            </svg>
+                            <span>登录中...</span>
+                        </span>
+                    </button>
+                    <button type="button" class="btn btn-danger" id="logoutBtn">
+                        <span class="btn-content">
+                            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                                <polyline points="16 17 21 12 16 7"/>
+                                <line x1="21" y1="12" x2="9" y2="12"/>
+                            </svg>
+                            <span class="btn-text">断开</span>
+                        </span>
+                        <span class="btn-loading">
+                            <svg class="spinner" viewBox="0 0 24 24">
+                                <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="31.4 31.4" stroke-linecap="round"/>
+                            </svg>
+                            <span>处理中...</span>
+                        </span>
+                    </button>
+                </div>
+            </form>
+
+            <div class="info-bar">
+                <div class="info-item clickable" id="logToggle" title="查看日志">
+                    <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>
+                        <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
+                    </svg>
+                    <span id="localIp">--</span>
+                </div>
+                <div class="info-item">
+                    <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                    <span id="currentTime">--:--:--</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="logModal" class="log-modal">
+        <div class="log-modal-content">
+            <div class="log-modal-header">
+                <h2>操作日志</h2>
+                <button class="log-close-btn" id="logCloseBtn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="log-modal-body" id="logContent"></div>
+        </div>
+    </div>
+
+    <div id="themeModal" class="theme-modal">
+        <div class="theme-modal-content">
+            <div class="theme-modal-header">
+                <h2>主题设置</h2>
+                <button class="theme-close-btn" id="themeCloseBtn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="theme-modal-body">
+                <div class="theme-slider-group">
+                    <div class="theme-slider-header">
+                        <span class="theme-label">主题颜色</span>
+                        <input type="color" id="themeColorPicker" value="#333" class="theme-color-picker" />
+                    </div>
+                </div>
+                <div class="theme-slider-group">
+                    <div class="theme-slider-header">
+                        <span class="theme-label">连接按钮不透明度</span>
+                        <span class="theme-slider-value" id="loginOpacityValue">100%</span>
+                    </div>
+                    <input type="range" class="theme-slider" id="loginOpacitySlider" min="0" max="100" value="100" />
+                </div>
+                <div class="theme-slider-group">
+                    <div class="theme-slider-header">
+                        <span class="theme-label">断开按钮不透明度</span>
+                        <span class="theme-slider-value" id="logoutOpacityValue">100%</span>
+                    </div>
+                    <input type="range" class="theme-slider" id="logoutOpacitySlider" min="0" max="100" value="100" />
+                </div>
+                <div class="theme-slider-group">
+                    <div class="theme-slider-header">
+                        <span class="theme-label">窗口圆角</span>
+                        <span class="theme-slider-value" id="radiusValue">0px</span>
+                    </div>
+                    <input type="range" class="theme-slider" id="radiusSlider" min="0" max="50" value="0" />
+                </div>
+            </div>
+            <div class="theme-modal-footer">
+                <button id="themeCancelBtn" class="btn btn-secondary">取消</button>
+                <button id="themeConfirmBtn" class="btn btn-primary">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="announcementModal" class="announcement-modal">
+        <div class="announcement-modal-content">
+            <div class="announcement-modal-header">
+                <h2>公告</h2>
+                <button class="announcement-close-btn" id="announcementCloseBtn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="announcement-modal-body" id="announcementList">
+            </div>
+            <div class="announcement-modal-footer">
+                <button class="btn btn-secondary" id="markAllReadBtn">一键已读</button>
+                <button class="btn btn-primary" id="announcementConfirmBtn">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="announcementDetailModal" class="announcement-detail-modal">
+        <div class="announcement-detail-content">
+            <div class="announcement-detail-header">
+                <h2 id="announcementDetailTitle">公告标题</h2>
+                <button class="announcement-detail-close-btn" id="announcementDetailCloseBtn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="announcement-detail-body" id="announcementDetailBody">
+            </div>
+            <div class="announcement-detail-footer">
+                <span class="announcement-author" id="announcementAuthor"></span>
+                <button class="btn btn-primary" id="announcementDetailConfirmBtn">确认</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="updateModal" class="update-modal">
+        <div class="update-modal-content">
+            <div class="update-modal-header">
+                <h2>发现新版本</h2>
+            </div>
+            <div class="update-modal-body">
+                <p class="update-message" id="updateMessage">发现新版本</p>
+                <p class="version-info" id="versionInfo" style="display: none;">当前版本: <span id="currentVersion"></span> --> 最新版本: <span id="latestVersion"></span></p>
+                <div class="update-progress" id="updateProgress" style="display: none;">
+                    <div class="update-progress-bar-container">
+                        <div class="update-progress-bar" id="updateProgressBar"></div>
+                    </div>
+                    <span class="update-progress-text" id="updateProgressText">0%</span>
+                </div>
+                <div class="update-actions">
+                    <button id="cancelBtn" class="btn btn-secondary" style="display: none;">取消</button>
+                    <button id="updateBtn" class="btn btn-primary" style="display: none;">更新</button>
+                    <button id="restartBtn" class="btn btn-primary" style="display: none;">重启应用</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="/main.js"></script>
+</body>
+</html>
