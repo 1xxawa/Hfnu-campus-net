@@ -13,7 +13,7 @@
 <img width="871" height="1009" alt="image" src="https://github.com/user-attachments/assets/b7d217da-9ee4-4dfe-9ecc-563e834961e6" />
 
 
-## 日志界面
+## 日志界面（点击下方IP地址打开）
 
 <img width="634" height="1009" alt="image" src="https://github.com/user-attachments/assets/9252ab58-575c-46a8-990b-465693339f21" />
 
