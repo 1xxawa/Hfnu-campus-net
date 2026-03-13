@@ -18,7 +18,8 @@
 <img width="634" height="1009" alt="image" src="https://github.com/user-attachments/assets/9252ab58-575c-46a8-990b-465693339f21" />
 
 ## 托盘功能
-<img width="127" height="125" alt="image" src="https://github.com/user-attachments/assets/30e6e189-04dd-41ed-b230-f3bfd7f7a936" />
+<img width="253" height="249" alt="image" src="https://github.com/user-attachments/assets/c56a1543-2624-4951-a673-7ca782562874" />
+
 
 ## 特点
 
