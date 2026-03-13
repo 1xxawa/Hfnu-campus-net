@@ -1,17 +1,21 @@
 # Hfnu-campus-net - 合师滨湖校区校园网自动登录工具
 
-一个基于 Tauri 2.0 构建的校园网自动登录桌面应用，支持自动连接/手动断开、公告查看、自动更新等功能。
+一个基于 Tauri 2.0 构建的校园网自动登录桌面应用，支持自动连接/手动断开、公告查看、自动更新等功能。   
+请勿与代理工具一同使用
 
 ## 主界面
 
-<img width="634" height="1009" alt="主界面" src="https://github.com/user-attachments/assets/d3eb9952-2ffc-4ac5-a03c-a3829aa9a38d" />
+<img width="634" height="1009" alt="image" src="https://github.com/user-attachments/assets/1f0cdfbf-6463-4473-96da-faafa99f11b1" />
+
 
 ## 主题设置
 
-<img width="863" height="1009" alt="主题设置" src="https://github.com/user-attachments/assets/7c7865e0-c008-483f-93c3-0f6070c76d02" />
+<img width="871" height="1009" alt="image" src="https://github.com/user-attachments/assets/b7d217da-9ee4-4dfe-9ecc-563e834961e6" />
+
 
 ## 日志界面
 
+<img width="634" height="1009" alt="image" src="https://github.com/user-attachments/assets/9252ab58-575c-46a8-990b-465693339f21" />
 
 
 ## 特点
