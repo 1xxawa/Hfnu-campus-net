@@ -294,6 +294,26 @@
         </div>
     </div>
 
+    <div id="errorModal" class="error-modal">
+        <div class="error-modal-content">
+            <div class="error-modal-header">
+                <h2>错误提示</h2>
+                <button class="error-close-btn" id="errorCloseBtn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="error-modal-body">
+                <p class="error-message" id="errorMessage"></p>
+            </div>
+            <div class="error-modal-footer">
+                <button class="btn btn-primary" id="errorConfirmBtn">确定</button>
+            </div>
+        </div>
+    </div>
+
     <script type="module" src="/main.js"></script>
 </body>
 </html>

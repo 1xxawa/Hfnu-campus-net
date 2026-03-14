@@ -129,6 +129,10 @@ body {
     background: var(--danger-light);
 }
 
+.status-indicator.waiting {
+    background: var(--gray-100);
+}
+
 .status-indicator.checking {
     background: var(--gray-100);
 }
@@ -147,6 +151,11 @@ body {
 
 .status-indicator.offline .status-dot {
     background: var(--danger);
+}
+
+.status-indicator.waiting .status-dot {
+    background: var(--gray-500);
+    animation: pulse 1s infinite;
 }
 
 .status-indicator.checking .status-dot {
@@ -599,7 +608,8 @@ body {
 .theme-modal,
 .update-modal,
 .announcement-modal,
-.announcement-detail-modal {
+.announcement-detail-modal,
+.error-modal {
     position: fixed;
     top: 0;
     left: 0;
@@ -627,7 +637,8 @@ body {
 .theme-modal-content,
 .update-modal-content,
 .announcement-modal-content,
-.announcement-detail-content {
+.announcement-detail-content,
+.error-modal-content {
     background: white;
     border-radius: var(--radius);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
@@ -652,7 +663,8 @@ body {
 
 .log-modal-header,
 .theme-modal-header,
-.update-modal-header {
+.update-modal-header,
+.error-modal-header {
     padding: 16px 20px;
     background: var(--primary);
     color: white;
@@ -663,14 +675,16 @@ body {
 
 .log-modal-header h2,
 .theme-modal-header h2,
-.update-modal-header h2 {
+.update-modal-header h2,
+.error-modal-header h2 {
     font-size: 16px;
     font-weight: 600;
     margin: 0;
 }
 
 .log-close-btn,
-.theme-close-btn {
+.theme-close-btn,
+.error-close-btn {
     background: var(--primary);
     border: 1px solid var(--primary-hover);
     cursor: pointer;
@@ -683,12 +697,14 @@ body {
 }
 
 .log-close-btn:hover,
-.theme-close-btn:hover {
+.theme-close-btn:hover,
+.error-close-btn:hover {
     background: var(--primary-hover);
 }
 
 .log-close-btn svg,
-.theme-close-btn svg {
+.theme-close-btn svg,
+.error-close-btn svg {
     width: 16px;
     height: 16px;
     color: white;
@@ -902,6 +918,26 @@ body {
     font-size: 12px;
     color: var(--gray-600);
     text-align: center;
+}
+
+.error-modal-body {
+    padding: 20px;
+    text-align: center;
+}
+
+.error-message {
+    margin: 0;
+    color: var(--danger);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.error-modal-footer {
+    padding: 16px 20px;
+    background: var(--gray-100);
+    display: flex;
+    justify-content: center;
+    border-top: 1px solid var(--gray-200);
 }
 
 .update-actions {
@@ -1121,6 +1157,21 @@ body {
 
 .announcement-item-status.read {
     color: var(--gray-400);
+}
+
+.announcement-item.pinned {
+    border-left: 3px solid #f97316;
+    background: linear-gradient(to right, rgba(249, 115, 22, 0.05), transparent);
+}
+
+.pinned-tag {
+    color: #f97316;
+    font-weight: 600;
+    margin-right: 4px;
+}
+
+.pinned-title {
+    color: #f97316;
 }
 
 .announcement-modal-footer {

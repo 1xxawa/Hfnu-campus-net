@@ -25,7 +25,6 @@ static NETWORK_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
         .timeout(std::time::Duration::from_secs(5))
         .danger_accept_invalid_certs(true)
         .redirect(reqwest::redirect::Policy::none())
-        .no_proxy()
         .build()
         .expect("Failed to create network client")
 });
@@ -34,13 +33,38 @@ static LOGIN_PAGE_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .danger_accept_invalid_certs(true)
-        .no_proxy()
         .build()
         .expect("Failed to create login page client")
 });
 
+static LOGIN_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .danger_accept_invalid_certs(true)
+        .build()
+        .expect("Failed to create login client")
+});
+
+static GITEE_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .danger_accept_invalid_certs(true)
+        .build()
+        .expect("Failed to create gitee client")
+});
+
+static DOWNLOAD_CLIENT: Lazy<reqwest::Client> = Lazy::new(|| {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .danger_accept_invalid_certs(true)
+        .build()
+        .expect("Failed to create download client")
+});
+
 static NETWORK_STATUS: AtomicBool = AtomicBool::new(false);
 static STATUS_MENU_ITEM: Lazy<Mutex<Option<MenuItem<tauri::Wry>>>> = Lazy::new(|| Mutex::new(None));
+static NETWORK_MONITOR_RUNNING: AtomicBool = AtomicBool::new(false);
+static MANUAL_DISCONNECT: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginConfig {
@@ -235,7 +259,7 @@ fn extract_message(response: &str) -> (bool, String, bool, bool) {
         }
     }
     
-    (false, "未知响应".to_string(), false, false)
+    (false, "未知响应，请关闭代理工具后重试".to_string(), false, false)
 }
 
 #[tauri::command]
@@ -316,6 +340,172 @@ async fn check_network_internal() -> bool {
 }
 
 #[tauri::command]
+async fn start_network_monitor(app: AppHandle) -> Result<(), String> {
+    if NETWORK_MONITOR_RUNNING.swap(true, Ordering::SeqCst) {
+        return Ok(());
+    }
+    
+    let app_handle = app.clone();
+    let app_handle_periodic = app.clone();
+    
+    // 定期检测任务（异步，每30秒检测一次）
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+        interval.tick().await;
+        
+        loop {
+            interval.tick().await;
+            
+            let current_online = check_network_internal().await;
+            let prev_online = NETWORK_STATUS.load(Ordering::SeqCst);
+            
+            if current_online != prev_online {
+                NETWORK_STATUS.store(current_online, Ordering::SeqCst);
+                
+                let status = if current_online { "网络已连接" } else { "网络未连接" };
+                
+                if let Some(tray) = app_handle_periodic.tray_by_id("main") {
+                    let _ = tray.set_tooltip(Some(&format!("校园网自动登录 - {}", status)));
+                }
+                
+                if let Some(status_item) = STATUS_MENU_ITEM.lock().unwrap().as_ref() {
+                    let _ = status_item.set_text(status);
+                }
+                
+                if !current_online && !MANUAL_DISCONNECT.load(Ordering::SeqCst) {
+                    show_notification(&app_handle_periodic, "网络断开", "网络连接已断开，请检查网络");
+                }
+                
+                if current_online {
+                    MANUAL_DISCONNECT.store(false, Ordering::SeqCst);
+                }
+                
+                let _ = app_handle_periodic.emit("network-status-changed", serde_json::json!({ "online": current_online, "initial": false }));
+            }
+        }
+    });
+    
+    // 事件驱动检测任务（Windows 使用 NotifyAddrChange）
+    std::thread::spawn(move || {
+        #[cfg(windows)]
+        {
+            use std::ptr;
+            use winapi::um::iphlpapi::NotifyAddrChange;
+            use winapi::um::handleapi::CloseHandle;
+            use winapi::um::synchapi::WaitForSingleObject;
+            use winapi::um::winbase::INFINITE;
+            
+            let mut prev_online = check_network_status_sync();
+            NETWORK_STATUS.store(prev_online, Ordering::SeqCst);
+            let _ = app_handle.emit("network-status-changed", serde_json::json!({ "online": prev_online, "initial": true }));
+            
+            loop {
+                let mut handle: winapi::shared::ntdef::HANDLE = ptr::null_mut();
+                let ret = unsafe { NotifyAddrChange(&mut handle, ptr::null_mut()) };
+                
+                if ret != 0 {
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                    continue;
+                }
+                
+                unsafe {
+                    WaitForSingleObject(handle, INFINITE);
+                    CloseHandle(handle);
+                }
+                
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                
+                let current_online = check_network_status_sync();
+                
+                if current_online != prev_online {
+                    prev_online = current_online;
+                    
+                    NETWORK_STATUS.store(current_online, Ordering::SeqCst);
+                    
+                    let status = if current_online { "网络已连接" } else { "网络未连接" };
+                    
+                    if let Some(tray) = app_handle.tray_by_id("main") {
+                        let _ = tray.set_tooltip(Some(&format!("校园网自动登录 - {}", status)));
+                    }
+                    
+                    if let Some(status_item) = STATUS_MENU_ITEM.lock().unwrap().as_ref() {
+                        let _ = status_item.set_text(status);
+                    }
+                    
+                    if !current_online && !MANUAL_DISCONNECT.load(Ordering::SeqCst) {
+                        show_notification(&app_handle, "网络断开", "网络连接已断开，请检查网络");
+                    }
+                    
+                    if current_online {
+                        MANUAL_DISCONNECT.store(false, Ordering::SeqCst);
+                    }
+                    
+                    let _ = app_handle.emit("network-status-changed", serde_json::json!({ "online": current_online, "initial": false }));
+                }
+            }
+        }
+        
+        #[cfg(not(windows))]
+        {
+            let mut prev_online = check_network_status_sync();
+            NETWORK_STATUS.store(prev_online, Ordering::SeqCst);
+            let _ = app_handle.emit("network-status-changed", serde_json::json!({ "online": prev_online, "initial": true }));
+            
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(10));
+                
+                let current_online = check_network_status_sync();
+                
+                if current_online != prev_online {
+                    prev_online = current_online;
+                    NETWORK_STATUS.store(current_online, Ordering::SeqCst);
+                    
+                    if !current_online && !MANUAL_DISCONNECT.load(Ordering::SeqCst) {
+                        show_notification(&app_handle, "网络断开", "网络连接已断开，请检查网络");
+                    }
+                    
+                    if current_online {
+                        MANUAL_DISCONNECT.store(false, Ordering::SeqCst);
+                    }
+                    
+                    let _ = app_handle.emit("network-status-changed", serde_json::json!({ "online": current_online, "initial": false }));
+                }
+            }
+        }
+    });
+    
+    Ok(())
+}
+
+fn check_network_status_sync() -> bool {
+    let urls = vec![
+        "http://connect.rom.miui.com/generate_204",
+        "http://www.gstatic.com/generate_204",
+        "http://www.baidu.com",
+    ];
+    
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .danger_accept_invalid_certs(true)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .ok();
+    
+    if let Some(client) = client {
+        for url in urls {
+            if let Ok(resp) = client.get(url).send() {
+                let status = resp.status();
+                if status == 204 || status == 200 {
+                    return true;
+                }
+            }
+        }
+    }
+    
+    false
+}
+
+#[tauri::command]
 async fn check_login_page_available() -> bool {
     match LOGIN_PAGE_CLIENT.get("http://192.168.180.3/").send().await {
         Ok(resp) => {
@@ -355,27 +545,9 @@ async fn login(app: AppHandle, student_id: String, password: String, operator: S
         ("v", "7382".to_string()),
     ];
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .danger_accept_invalid_certs(true)
-        .no_proxy()
-        .build();
-
-    let client = match client {
-        Ok(c) => c,
-        Err(e) => {
-            return LoginResult {
-                success: false,
-                message: format!("创建HTTP客户端失败: {}", e),
-                should_retry: false,
-                need_verify: false,
-            }
-        }
-    };
-
     let url = "http://192.168.180.3:801/eportal/portal/login";
 
-    let response = client
+    let response = LOGIN_CLIENT
         .get(url)
         .query(&params)
         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36")
@@ -564,13 +736,7 @@ fn set_hide_on_startup_command(enable: bool) -> Result<(), String> {
 
 #[tauri::command]
 async fn fetch_announcement_list() -> Result<Vec<String>, String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| format!("创建HTTP客户端失败: {}", e))?;
-    
-    let response = client
+    let response = GITEE_CLIENT
         .get("https://gitee.com/yxxawa/atocont/raw/master/gggl.txt")
         .send()
         .await
@@ -590,13 +756,7 @@ async fn fetch_announcement_list() -> Result<Vec<String>, String> {
 
 #[tauri::command]
 async fn fetch_announcement_content(url: String) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| format!("创建HTTP客户端失败: {}", e))?;
-    
-    let response = client
+    let response = GITEE_CLIENT
         .get(&url)
         .send()
         .await
@@ -630,13 +790,7 @@ struct LatestVersion {
 
 #[tauri::command]
 async fn check_update() -> Result<Option<LatestVersion>, String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| format!("创建HTTP客户端失败: {}", e))?;
-    
-    let response = client
+    let response = GITEE_CLIENT
         .get("https://gitee.com/yxxawa/atocont/raw/master/latest.json")
         .send()
         .await
@@ -661,13 +815,7 @@ async fn check_update() -> Result<Option<LatestVersion>, String> {
 async fn download_update(app: AppHandle, url: String) -> Result<String, String> {
     use tauri::Manager;
     
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(300))
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| format!("创建HTTP客户端失败: {}", e))?;
-    
-    let response = client
+    let response = DOWNLOAD_CLIENT
         .get(&url)
         .send()
         .await
@@ -705,6 +853,11 @@ fn get_current_time() -> String {
 }
 
 #[tauri::command]
+fn get_version() -> String {
+    format!("v{}", env!("CARGO_PKG_VERSION"))
+}
+
+#[tauri::command]
 async fn logout(app: AppHandle) -> LoginResult {
     let local_ip = get_local_ip().await;
     
@@ -726,27 +879,9 @@ async fn logout(app: AppHandle) -> LoginResult {
         ("lang", "en".to_string()),
     ];
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .danger_accept_invalid_certs(true)
-        .no_proxy()
-        .build();
-
-    let client = match client {
-        Ok(c) => c,
-        Err(e) => {
-            return LoginResult {
-                success: false,
-                message: format!("创建HTTP客户端失败: {}", e),
-                should_retry: false,
-                need_verify: false,
-            }
-        }
-    };
-
     let url = "http://192.168.180.3:801/eportal/portal/logout";
 
-    let response = client
+    let response = LOGIN_CLIENT
         .get(url)
         .query(&params)
         .header("Host", "192.168.180.3:801")
@@ -765,6 +900,7 @@ async fn logout(app: AppHandle) -> LoginResult {
             let (success, message, _, _) = extract_message(&text);
             
             if status.is_success() || success {
+                MANUAL_DISCONNECT.store(true, Ordering::SeqCst);
                 NETWORK_STATUS.store(false, Ordering::SeqCst);
                 if let Some(tray) = app.tray_by_id("main") {
                     let _ = tray.set_tooltip(Some("校园网自动登录 - 网络未连接"));
@@ -786,11 +922,11 @@ async fn logout(app: AppHandle) -> LoginResult {
         }
         Err(e) => {
             let error_msg = if e.is_timeout() {
-                "连接超时".to_string()
+                "连接超时，请关闭代理工具后重试".to_string()
             } else if e.is_connect() {
-                "无法连接服务器".to_string()
+                "无法连接服务器，请关闭代理工具后重试".to_string()
             } else {
-                format!("请求失败: {}", e)
+                format!("请求失败，请关闭代理工具后重试: {}", e)
             };
             
             LoginResult {
@@ -1019,6 +1155,7 @@ pub fn run() {
             set_auto_launch,
             is_auto_launch_enabled,
             get_current_time,
+            get_version,
             hide_window,
             show_window,
             tray_login,
@@ -1027,7 +1164,8 @@ pub fn run() {
             fetch_announcement_list,
             fetch_announcement_content,
             check_update,
-            download_update
+            download_update,
+            start_network_monitor
         ))
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

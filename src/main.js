@@ -1,8 +1,20 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
-let isLoggingIn = false;
-let isLoggingOut = false;
+const state = {
+    isLoggingIn: false,
+    isLoggingOut: false,
+    waitLoginInterval: null,
+    waitLoginDotCount: 0,
+    announcements: [],
+    readAnnouncements: [],
+    announcementsFetched: false,
+    latestVersionInfo: null,
+    themeColor: '#333',
+    loginOpacity: 100,
+    logoutOpacity: 100,
+    borderRadius: 0,
+};
 
 const $ = (id) => document.getElementById(id);
 
@@ -63,6 +75,10 @@ const elements = {
     cancelBtn: $('cancelBtn'),
     updateBtn: $('updateBtn'),
     restartBtn: $('restartBtn'),
+    errorModal: $('errorModal'),
+    errorMessage: $('errorMessage'),
+    errorCloseBtn: $('errorCloseBtn'),
+    errorConfirmBtn: $('errorConfirmBtn'),
 };
 
 function addLog(message, type = 'info') {
@@ -72,6 +88,10 @@ function addLog(message, type = 'info') {
     entry.innerHTML = `<span class="log-time">${time}</span><span class="log-message">${message}</span>`;
     elements.logContent.appendChild(entry);
     elements.logContent.scrollTop = elements.logContent.scrollHeight;
+    
+    while (elements.logContent.children.length > 100) {
+        elements.logContent.removeChild(elements.logContent.firstChild);
+    }
 }
 
 function updateStatus(status, text) {
@@ -105,49 +125,6 @@ async function checkNetworkStatus() {
     }
 }
 
-async function loadSavedConfig() {
-    try {
-        const config = await invoke('load_config');
-        if (config.student_id) {
-            elements.studentId.value = config.student_id;
-            elements.password.value = config.password || '';
-            elements.operator.value = config.operator || 'telecom';
-            elements.autoLogin.checked = config.auto_login !== false;
-            
-            if (config.theme_color) {
-                selectedThemeColor = config.theme_color;
-                document.documentElement.style.setProperty('--primary', selectedThemeColor);
-                const hoverColor = adjustColorBrightness(selectedThemeColor, -20);
-                document.documentElement.style.setProperty('--primary-hover', hoverColor);
-                document.documentElement.style.setProperty('--header-bg', selectedThemeColor);
-                document.documentElement.style.setProperty('--header-text', '#fff');
-                applyButtonColors();
-            }
-            if (config.border_radius !== null && config.border_radius !== undefined) {
-                selectedRadius = config.border_radius;
-                document.documentElement.style.setProperty('--radius', `${selectedRadius}px`);
-            }
-            if (config.login_opacity !== null && config.login_opacity !== undefined) {
-                selectedLoginOpacity = config.login_opacity;
-                applyButtonColors();
-            }
-            if (config.logout_opacity !== null && config.logout_opacity !== undefined) {
-                selectedLogoutOpacity = config.logout_opacity;
-                applyButtonColors();
-            }
-            if (config.hide_on_startup !== null && config.hide_on_startup !== undefined && elements.hideOnStartup) {
-                elements.hideOnStartup.checked = config.hide_on_startup;
-            }
-            
-            addLog('已加载保存的配置', 'info');
-            return true;
-        }
-    } catch (error) {
-        addLog('加载配置失败', 'warning');
-    }
-    return false;
-}
-
 async function saveConfig() {
     if (!elements.savePassword.checked) return;
     
@@ -158,10 +135,10 @@ async function saveConfig() {
         auto_login: elements.autoLogin.checked,
         max_retries: 3,
         retry_interval: 3,
-        theme_color: selectedThemeColor,
-        border_radius: selectedRadius,
-        login_opacity: selectedLoginOpacity,
-        logout_opacity: selectedLogoutOpacity,
+        theme_color: state.themeColor,
+        border_radius: state.borderRadius,
+        login_opacity: state.loginOpacity,
+        logout_opacity: state.logoutOpacity,
         hide_on_startup: elements.hideOnStartup ? elements.hideOnStartup.checked : false,
     };
     
@@ -175,7 +152,7 @@ async function saveConfig() {
 async function handleLogin(e) {
     e.preventDefault();
     
-    if (isLoggingIn || isLoggingOut) return;
+    if (state.isLoggingIn || state.isLoggingOut) return;
     
     const studentId = elements.studentId.value.trim();
     const password = elements.password.value;
@@ -188,7 +165,7 @@ async function handleLogin(e) {
         return;
     }
     
-    isLoggingIn = true;
+    state.isLoggingIn = true;
     setButtonLoading(elements.loginBtn, true);
     addLog(`正在登录 ${studentId}@${operator}`, 'info');
     
@@ -205,10 +182,11 @@ async function handleLogin(e) {
         
         if (result.success) {
             addLog(result.message, 'success');
-            updateStatus('online', '网络已连接');
             
             if (result.need_verify) {
-                verifyNetworkStatus();
+                await verifyNetworkStatus();
+            } else {
+                updateStatus('online', '网络已连接');
             }
             
             fetchAnnouncementsAsync();
@@ -220,7 +198,7 @@ async function handleLogin(e) {
         addLog(`登录出错: ${error}`, 'error');
         updateStatus('offline', '登录失败');
     } finally {
-        isLoggingIn = false;
+        state.isLoggingIn = false;
         setButtonLoading(elements.loginBtn, false);
     }
 }
@@ -238,9 +216,9 @@ async function verifyNetworkStatus() {
 }
 
 async function handleLogout() {
-    if (isLoggingIn || isLoggingOut) return;
+    if (state.isLoggingIn || state.isLoggingOut) return;
     
-    isLoggingOut = true;
+    state.isLoggingOut = true;
     setButtonLoading(elements.logoutBtn, true);
     addLog('正在断开连接...', 'info');
     
@@ -256,7 +234,7 @@ async function handleLogout() {
     } catch (error) {
         addLog(`断开连接出错: ${error}`, 'error');
     } finally {
-        isLoggingOut = false;
+        state.isLoggingOut = false;
         setButtonLoading(elements.logoutBtn, false);
     }
 }
@@ -283,36 +261,46 @@ async function handleHideOnStartupChange(e) {
     }
 }
 
-let announcements = [];
-let readAnnouncements = [];
-let announcementsFetched = false;
-
 async function fetchAnnouncementsWithTimeout() {
-    const timeout = 5000;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
-    
     try {
         const urls = await invoke('fetch_announcement_list');
-        clearTimeout(timeoutId);
         
         if (!urls || urls.length === 0) return [];
         
-        const fetchedAnnouncements = [];
-        for (const url of urls) {
+        const fetchPromises = urls.map(async (url) => {
+            let actualUrl = url;
+            let isPinned = false;
+            
+            if (url.startsWith('top|')) {
+                isPinned = true;
+                actualUrl = url.substring(4);
+            }
+            
             try {
-                const content = await invoke('fetch_announcement_content', { url });
-                const parsed = parseAnnouncement(content, url);
+                const content = await invoke('fetch_announcement_content', { url: actualUrl });
+                const parsed = parseAnnouncement(content, actualUrl);
                 if (parsed) {
-                    fetchedAnnouncements.push(parsed);
+                    parsed.pinned = isPinned;
+                    return parsed;
                 }
             } catch (e) {
-                console.error('Failed to fetch announcement:', url, e);
+                console.error('Failed to fetch announcement:', actualUrl, e);
             }
-        }
+            return null;
+        });
+        
+        const results = await Promise.all(fetchPromises);
+        
+        const fetchedAnnouncements = results.filter(a => a !== null);
+        
+        fetchedAnnouncements.sort((a, b) => {
+            if (a.pinned && !b.pinned) return -1;
+            if (!a.pinned && b.pinned) return 1;
+            return 0;
+        });
+        
         return fetchedAnnouncements;
     } catch (error) {
-        clearTimeout(timeoutId);
         throw error;
     }
 }
@@ -364,11 +352,11 @@ function loadReadAnnouncements() {
 }
 
 function saveReadAnnouncements() {
-    localStorage.setItem('readAnnouncements', JSON.stringify(readAnnouncements));
+    localStorage.setItem('readAnnouncements', JSON.stringify(state.readAnnouncements));
 }
 
 function updateAnnouncementDot() {
-    const hasUnread = announcements.some(a => !readAnnouncements.includes(a.id));
+    const hasUnread = state.announcements.some(a => !state.readAnnouncements.includes(a.id));
     if (hasUnread) {
         elements.announcementDot.classList.add('show');
     } else {
@@ -377,15 +365,16 @@ function updateAnnouncementDot() {
 }
 
 function renderAnnouncementList() {
-    if (announcements.length === 0) {
+    if (state.announcements.length === 0) {
         elements.announcementList.innerHTML = '<div class="announcement-empty">暂无公告</div>';
         return;
     }
     
-    elements.announcementList.innerHTML = announcements.map(a => {
-        const isRead = readAnnouncements.includes(a.id);
+    elements.announcementList.innerHTML = state.announcements.map(a => {
+        const isRead = state.readAnnouncements.includes(a.id);
+        const pinnedPrefix = a.pinned ? '<span class="pinned-tag">[置顶]</span> ' : '';
         return `
-            <div class="announcement-item ${isRead ? '' : 'unread'}" data-id="${a.id}">
+            <div class="announcement-item ${isRead ? '' : 'unread'} ${a.pinned ? 'pinned' : ''}" data-id="${a.id}">
                 <svg class="announcement-item-icon ${isRead ? 'read' : 'unread'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     ${isRead 
                         ? '<path d="M22 4H2v16h20V4z"/><path d="M22 4l-10 7L2 4"/>'
@@ -393,7 +382,7 @@ function renderAnnouncementList() {
                     }
                 </svg>
                 <span class="announcement-item-content">
-                    <span class="announcement-item-title">${escapeHtml(a.title)}</span>
+                    <span class="announcement-item-title ${a.pinned ? 'pinned-title' : ''}">${pinnedPrefix}${escapeHtml(a.title)}</span>
                 </span>
                 <span class="announcement-item-status ${isRead ? 'read' : 'unread'}">${isRead ? '已读' : '未读'}</span>
             </div>
@@ -403,7 +392,7 @@ function renderAnnouncementList() {
     elements.announcementList.querySelectorAll('.announcement-item').forEach(item => {
         item.addEventListener('click', () => {
             const id = item.dataset.id;
-            const announcement = announcements.find(a => a.id === id);
+            const announcement = state.announcements.find(a => a.id === id);
             if (announcement) {
                 showAnnouncementDetail(announcement);
             }
@@ -458,8 +447,8 @@ function showAnnouncementDetail(announcement) {
         });
     });
     
-    if (!readAnnouncements.includes(announcement.id)) {
-        readAnnouncements.push(announcement.id);
+    if (!state.readAnnouncements.includes(announcement.id)) {
+        state.readAnnouncements.push(announcement.id);
         saveReadAnnouncements();
         updateAnnouncementDot();
         renderAnnouncementList();
@@ -479,9 +468,9 @@ function closeAnnouncementDetailModal() {
 }
 
 function markAllAsRead() {
-    announcements.forEach(a => {
-        if (!readAnnouncements.includes(a.id)) {
-            readAnnouncements.push(a.id);
+    state.announcements.forEach(a => {
+        if (!state.readAnnouncements.includes(a.id)) {
+            state.readAnnouncements.push(a.id);
         }
     });
     saveReadAnnouncements();
@@ -490,12 +479,12 @@ function markAllAsRead() {
 }
 
 async function fetchAnnouncementsAsync() {
-    if (announcementsFetched) return;
-    announcementsFetched = true;
+    if (state.announcementsFetched) return;
+    state.announcementsFetched = true;
     
     try {
         const fetched = await fetchAnnouncementsWithTimeout();
-        announcements = fetched;
+        state.announcements = fetched;
         updateAnnouncementDot();
         renderAnnouncementList();
     } catch (error) {
@@ -504,13 +493,13 @@ async function fetchAnnouncementsAsync() {
     }
 }
 
-let latestVersionInfo = null;
+
 
 async function checkUpdateAsync() {
     try {
         const result = await invoke('check_update');
         if (result) {
-            latestVersionInfo = result;
+            state.latestVersionInfo = result;
             showUpdateModal(result);
         }
     } catch (error) {
@@ -518,8 +507,12 @@ async function checkUpdateAsync() {
     }
 }
 
-function showUpdateModal(info) {
-    elements.currentVersion.textContent = 'v1.0.6';
+async function showUpdateModal(info) {
+    try {
+        elements.currentVersion.textContent = await invoke('get_version');
+    } catch {
+        elements.currentVersion.textContent = 'v1.0.6';
+    }
     elements.latestVersion.textContent = info.version;
     elements.versionInfo.style.display = 'block';
     elements.updateMessage.textContent = info.notes || '发现新版本';
@@ -534,10 +527,19 @@ function closeUpdateModal() {
     elements.updateModal.style.display = 'none';
 }
 
+function showErrorModal(message) {
+    elements.errorMessage.textContent = message;
+    elements.errorModal.style.display = 'flex';
+}
+
+function closeErrorModal() {
+    elements.errorModal.style.display = 'none';
+}
+
 async function startDownload() {
-    if (!latestVersionInfo) return;
+    if (!state.latestVersionInfo) return;
     
-    const url = latestVersionInfo.platforms['windows-x86_64'].url;
+    const url = state.latestVersionInfo.platforms['windows-x86_64'].url;
     
     elements.updateBtn.disabled = true;
     elements.cancelBtn.disabled = true;
@@ -561,7 +563,7 @@ async function startDownload() {
 }
 
 function initAnnouncements() {
-    readAnnouncements = loadReadAnnouncements();
+    state.readAnnouncements = loadReadAnnouncements();
 }
 
 async function updateLocalIp() {
@@ -595,20 +597,15 @@ function togglePasswordVisibility() {
     }
 }
 
-let selectedThemeColor = '#333';
-let selectedLoginOpacity = 100;
-let selectedLogoutOpacity = 100;
-let selectedRadius = 0;
-
 function openThemeModal() {
     elements.themeModal.style.display = 'flex';
-    elements.themeColorPicker.value = selectedThemeColor;
-    elements.loginOpacitySlider.value = selectedLoginOpacity;
-    elements.loginOpacityValue.textContent = `${selectedLoginOpacity}%`;
-    elements.logoutOpacitySlider.value = selectedLogoutOpacity;
-    elements.logoutOpacityValue.textContent = `${selectedLogoutOpacity}%`;
-    elements.radiusSlider.value = selectedRadius;
-    elements.radiusValue.textContent = `${selectedRadius}px`;
+    elements.themeColorPicker.value = state.themeColor;
+    elements.loginOpacitySlider.value = state.loginOpacity;
+    elements.loginOpacityValue.textContent = `${state.loginOpacity}%`;
+    elements.logoutOpacitySlider.value = state.logoutOpacity;
+    elements.logoutOpacityValue.textContent = `${state.logoutOpacity}%`;
+    elements.radiusSlider.value = state.borderRadius;
+    elements.radiusValue.textContent = `${state.borderRadius}px`;
 }
 
 function closeThemeModal() {
@@ -625,7 +622,7 @@ function closeLogModal() {
 
 function handleThemeColorChange(e) {
     const selectedColor = e.target.value;
-    selectedThemeColor = selectedColor;
+    state.themeColor = selectedColor;
     document.documentElement.style.setProperty('--primary', selectedColor);
     const hoverColor = adjustColorBrightness(selectedColor, -20);
     document.documentElement.style.setProperty('--primary-hover', hoverColor);
@@ -635,21 +632,21 @@ function handleThemeColorChange(e) {
 }
 
 function handleLoginOpacityChange(e) {
-    selectedLoginOpacity = parseInt(e.target.value);
-    elements.loginOpacityValue.textContent = `${selectedLoginOpacity}%`;
+    state.loginOpacity = parseInt(e.target.value);
+    elements.loginOpacityValue.textContent = `${state.loginOpacity}%`;
     applyButtonColors();
 }
 
 function handleLogoutOpacityChange(e) {
-    selectedLogoutOpacity = parseInt(e.target.value);
-    elements.logoutOpacityValue.textContent = `${selectedLogoutOpacity}%`;
+    state.logoutOpacity = parseInt(e.target.value);
+    elements.logoutOpacityValue.textContent = `${state.logoutOpacity}%`;
     applyButtonColors();
 }
 
 function applyButtonColors() {
-    const themeRgb = hexToRgb(selectedThemeColor);
-    document.documentElement.style.setProperty('--login-color', `rgba(${themeRgb.r}, ${themeRgb.g}, ${themeRgb.b}, ${selectedLoginOpacity / 100})`);
-    document.documentElement.style.setProperty('--logout-color', `rgba(${themeRgb.r}, ${themeRgb.g}, ${themeRgb.b}, ${selectedLogoutOpacity / 100})`);
+    const themeRgb = hexToRgb(state.themeColor);
+    document.documentElement.style.setProperty('--login-color', `rgba(${themeRgb.r}, ${themeRgb.g}, ${themeRgb.b}, ${state.loginOpacity / 100})`);
+    document.documentElement.style.setProperty('--logout-color', `rgba(${themeRgb.r}, ${themeRgb.g}, ${themeRgb.b}, ${state.logoutOpacity / 100})`);
 }
 
 function hexToRgb(hex) {
@@ -659,15 +656,6 @@ function hexToRgb(hex) {
         g: parseInt(result[2], 16),
         b: parseInt(result[3], 16)
     } : { r: 51, g: 51, b: 51 };
-}
-
-function isColorDark(hex) {
-    const num = parseInt(hex.replace('#', ''), 16);
-    const r = (num >> 16) & 255;
-    const g = (num >> 8) & 255;
-    const b = num & 255;
-    const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-    return brightness < 128;
 }
 
 function adjustColorBrightness(hex, percent) {
@@ -684,82 +672,115 @@ function adjustColorBrightness(hex, percent) {
 }
 
 function handleRadiusChange(e) {
-    selectedRadius = parseInt(e.target.value);
-    elements.radiusValue.textContent = `${selectedRadius}px`;
-    document.documentElement.style.setProperty('--radius', `${selectedRadius}px`);
+    state.borderRadius = parseInt(e.target.value);
+    elements.radiusValue.textContent = `${state.borderRadius}px`;
+    document.documentElement.style.setProperty('--radius', `${state.borderRadius}px`);
 }
 
-function applyTheme() {
+async function applyTheme() {
+    await saveConfig();
     closeThemeModal();
     addLog('主题已更新', 'success');
 }
 
-async function init() {
-    const initHoverColor = adjustColorBrightness(selectedThemeColor, -20);
-    document.documentElement.style.setProperty('--primary', selectedThemeColor);
-    document.documentElement.style.setProperty('--primary-hover', initHoverColor);
-    document.documentElement.style.setProperty('--header-bg', selectedThemeColor);
+function applyThemeSettings() {
+    const hoverColor = adjustColorBrightness(state.themeColor, -20);
+    document.documentElement.style.setProperty('--primary', state.themeColor);
+    document.documentElement.style.setProperty('--primary-hover', hoverColor);
+    document.documentElement.style.setProperty('--header-bg', state.themeColor);
     document.documentElement.style.setProperty('--header-text', '#fff');
+    document.documentElement.style.setProperty('--radius', `${state.borderRadius}px`);
     applyButtonColors();
-    
+}
+
+async function init() {
     document.addEventListener('contextmenu', function(e) {
         e.preventDefault();
     });
     
     addLog('程序启动', 'info');
     
-    await updateLocalIp();
-    await updateCurrentTime();
     initAnnouncements();
     
-    const isOnline = await checkNetworkStatus();
-    if (isOnline) {
-        fetchAnnouncementsAsync();
-        checkUpdateAsync();
-    }
+    updateLocalIp();
+    updateCurrentTime();
     
-    const hasConfig = await loadSavedConfig();
+    invoke('start_network_monitor');
     
     const config = await invoke('load_config');
+    const hasConfig = !!config.student_id;
+    
+    if (hasConfig) {
+        elements.studentId.value = config.student_id;
+        elements.password.value = config.password || '';
+        elements.operator.value = config.operator || 'telecom';
+        elements.autoLogin.checked = config.auto_login !== false;
+        
+        if (config.theme_color) {
+            state.themeColor = config.theme_color;
+        }
+        if (config.border_radius !== null && config.border_radius !== undefined) {
+            state.borderRadius = config.border_radius;
+        }
+        if (config.login_opacity !== null && config.login_opacity !== undefined) {
+            state.loginOpacity = config.login_opacity;
+        }
+        if (config.logout_opacity !== null && config.logout_opacity !== undefined) {
+            state.logoutOpacity = config.logout_opacity;
+        }
+        if (config.hide_on_startup !== null && config.hide_on_startup !== undefined && elements.hideOnStartup) {
+            elements.hideOnStartup.checked = config.hide_on_startup;
+        }
+    }
+    
+    applyThemeSettings();
+    
     if (!config.hide_on_startup) {
         await invoke('show_window');
     }
     
     if (elements.themeColorPicker) {
-        elements.themeColorPicker.value = selectedThemeColor;
+        elements.themeColorPicker.value = state.themeColor;
     }
     if (elements.radiusSlider) {
-        elements.radiusSlider.value = selectedRadius;
-        elements.radiusValue.textContent = `${selectedRadius}px`;
+        elements.radiusSlider.value = state.borderRadius;
+        elements.radiusValue.textContent = `${state.borderRadius}px`;
     }
     if (elements.loginOpacitySlider) {
-        elements.loginOpacitySlider.value = selectedLoginOpacity;
-        elements.loginOpacityValue.textContent = `${selectedLoginOpacity}%`;
+        elements.loginOpacitySlider.value = state.loginOpacity;
+        elements.loginOpacityValue.textContent = `${state.loginOpacity}%`;
     }
     if (elements.logoutOpacitySlider) {
-        elements.logoutOpacitySlider.value = selectedLogoutOpacity;
-        elements.logoutOpacityValue.textContent = `${selectedLogoutOpacity}%`;
+        elements.logoutOpacitySlider.value = state.logoutOpacity;
+        elements.logoutOpacityValue.textContent = `${state.logoutOpacity}%`;
     }
     
-    try {
-        const isAutoLaunch = await invoke('is_auto_launch_enabled');
+    invoke('is_auto_launch_enabled').then(isAutoLaunch => {
         elements.autoLaunch.checked = isAutoLaunch;
-    } catch (error) {
-    }
+    }).catch(() => {});
     
     if (hasConfig && elements.autoLogin.checked) {
         const onlineStatus = await checkNetworkStatus();
-        if (!onlineStatus) {
-            addLog('等待登录界面可用...', 'info');
+        if (onlineStatus) {
+            fetchAnnouncementsAsync();
+            checkUpdateAsync();
+        } else {
+            updateStatus('waiting', '等待登录界面...');
             
             let retryCount = 0;
-            const maxWaitRetry = 10;
+            const maxWaitRetry = 60;
+            state.waitLoginDotCount = 0;
             
             const checkAndLogin = async () => {
                 retryCount++;
                 try {
                     const loginPageAvailable = await invoke('check_login_page_available');
                     if (loginPageAvailable) {
+                        if (state.waitLoginInterval) {
+                            clearInterval(state.waitLoginInterval);
+                            state.waitLoginInterval = null;
+                        }
+                        updateStatus('waiting', '登录界面已就绪...');
                         addLog('登录界面已就绪，自动登录中...', 'info');
                         setTimeout(() => {
                             elements.loginForm.dispatchEvent(new Event('submit'));
@@ -767,19 +788,43 @@ async function init() {
                     } else if (retryCount < maxWaitRetry) {
                         setTimeout(checkAndLogin, 1000);
                     } else {
-                        addLog('登录界面不可用，请检查网络连接', 'warning');
+                        if (state.waitLoginInterval) {
+                            clearInterval(state.waitLoginInterval);
+                            state.waitLoginInterval = null;
+                        }
+                        updateStatus('offline', '无法访问登录界面');
+                        addLog('无法访问登录界面，请检查网线是否连接', 'error');
+                        showErrorModal('无法访问登录界面，请检查网线是否连接');
                     }
                 } catch (error) {
                     if (retryCount < maxWaitRetry) {
                         setTimeout(checkAndLogin, 1000);
                     } else {
+                        if (state.waitLoginInterval) {
+                            clearInterval(state.waitLoginInterval);
+                            state.waitLoginInterval = null;
+                        }
                         addLog('检测登录界面失败', 'error');
+                        showErrorModal('无法访问登录界面，请检查网线是否连接');
                     }
                 }
             };
             
+            state.waitLoginInterval = setInterval(() => {
+                state.waitLoginDotCount = (state.waitLoginDotCount + 1) % 4;
+                const dots = '.'.repeat(state.waitLoginDotCount);
+                updateStatus('waiting', `等待登录界面${dots}`);
+            }, 500);
+            
             setTimeout(checkAndLogin, 1000);
         }
+    } else {
+        checkNetworkStatus().then(isOnline => {
+            if (isOnline) {
+                fetchAnnouncementsAsync();
+                checkUpdateAsync();
+            }
+        });
     }
     
     setInterval(updateCurrentTime, 1000);
@@ -818,6 +863,27 @@ listen('hide-on-startup-changed', async (event) => {
         elements.hideOnStartup.checked = enabled;
     }
     addLog(enabled ? '已启用启动时隐藏窗口' : '已关闭启动时隐藏窗口', 'success');
+});
+
+listen('network-status-changed', async (event) => {
+    const { online, initial } = event.payload;
+    
+    if (initial) {
+        if (online) {
+            updateStatus('online', '网络已连接');
+        } else {
+            updateStatus('offline', '网络未连接');
+        }
+        return;
+    }
+    
+    if (online) {
+        updateStatus('online', '网络已连接');
+        addLog('网络已恢复连接', 'success');
+    } else {
+        updateStatus('offline', '网络未连接');
+        addLog('网络连接已断开', 'warning');
+    }
 });
 
 elements.loginForm.addEventListener('submit', handleLogin);
@@ -879,6 +945,13 @@ if (elements.announcementDetailConfirmBtn) {
     elements.announcementDetailConfirmBtn.addEventListener('click', closeAnnouncementDetailModal);
 }
 
+if (elements.errorCloseBtn) {
+    elements.errorCloseBtn.addEventListener('click', closeErrorModal);
+}
+if (elements.errorConfirmBtn) {
+    elements.errorConfirmBtn.addEventListener('click', closeErrorModal);
+}
+
 if (elements.cancelBtn) {
     elements.cancelBtn.addEventListener('click', closeUpdateModal);
 }
@@ -887,15 +960,6 @@ if (elements.updateBtn) {
 }
 if (elements.restartBtn) {
     elements.restartBtn.addEventListener('click', closeUpdateModal);
-}
-if (elements.markAllReadBtn) {
-    elements.markAllReadBtn.addEventListener('click', markAllAsRead);
-}
-if (elements.announcementDetailCloseBtn) {
-    elements.announcementDetailCloseBtn.addEventListener('click', closeAnnouncementDetailModal);
-}
-if (elements.announcementDetailConfirmBtn) {
-    elements.announcementDetailConfirmBtn.addEventListener('click', closeAnnouncementDetailModal);
 }
 
 if (elements.logModal) {
@@ -921,6 +985,11 @@ if (elements.announcementDetailModal) {
 if (elements.updateModal) {
     elements.updateModal.addEventListener('click', (e) => {
         if (e.target === elements.updateModal) closeUpdateModal();
+    });
+}
+if (elements.errorModal) {
+    elements.errorModal.addEventListener('click', (e) => {
+        if (e.target === elements.errorModal) closeErrorModal();
     });
 }
 
